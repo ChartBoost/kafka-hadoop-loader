@@ -1,16 +1,11 @@
 package co.gridport.kafka.hadoop;
 
-import kafka.api.PartitionFetchInfo;
-import kafka.api.PartitionOffsetRequestInfo;
-import kafka.common.TopicAndPartition;
-import kafka.javaapi.FetchRequest;
-import kafka.javaapi.FetchResponse;
-import kafka.javaapi.OffsetRequest;
-import kafka.javaapi.OffsetResponse;
-import kafka.javaapi.consumer.SimpleConsumer;
-import kafka.javaapi.message.ByteBufferMessageSet;
+import java.io.IOException;
+import java.util.List;
+
 import kafka.message.Message;
 import kafka.message.MessageAndOffset;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.BytesWritable;
 import org.apache.hadoop.io.LongWritable;
@@ -20,12 +15,6 @@ import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.UUID;
-
 public class KafkaInputRecordReader extends RecordReader<LongWritable, BytesWritable> {
 
     static Logger log = LoggerFactory.getLogger(KafkaInputRecordReader.class);
@@ -33,34 +22,22 @@ public class KafkaInputRecordReader extends RecordReader<LongWritable, BytesWrit
     private Configuration conf;
 
     private KafkaInputSplit split;
-    //private TaskAttemptContext context;
 
-    private SimpleConsumer consumer ;
+    private KafkaInputFetcher fetcher;
     private int fetchSize;
     private String topic;
     private String reset;
 
     private int partition;
-    private long earliestOffset;
+    private long smallestOffset;
     private long watermark;
     private long latestOffset;
-
-    private ByteBufferMessageSet messages;
-    private Iterator<MessageAndOffset> iterator;
     private LongWritable key;
     private BytesWritable value;
 
     private long numProcessedMessages = 0L;
 
-    private String clientId = null;
-
-    // return UUID based clientId
-    private synchronized String getClientId() {
-        if (clientId == null) {
-            clientId = "KafkaInputRecordReader" + UUID.randomUUID();
-        }
-        return clientId;
-    }
+    private String clientId = "hadoop-loader";
 
     @Override
     public void initialize(InputSplit split, TaskAttemptContext context) throws IOException, InterruptedException
@@ -70,34 +47,45 @@ public class KafkaInputRecordReader extends RecordReader<LongWritable, BytesWrit
 
     public void initialize(InputSplit split, Configuration conf) throws IOException, InterruptedException
     {
+    	log.info("initialize");
         this.conf = conf;
         this.split = (KafkaInputSplit) split;
-        topic = this.split.getTopic();
-        partition = this.split.getPartition();
-        watermark = this.split.getWatermark();
+        this.topic = this.split.getTopic();
+        this.partition = this.split.getPartition();
+        this.watermark = this.split.getWatermark();
+        log.info("before zkutils");
+        ZkUtils zk = new ZkUtils(
+            conf.get("kafka.zk.connect"),
+            conf.getInt("kafka.zk.sessiontimeout.ms", 10000),
+            conf.getInt("kafka.zk.connectiontimeout.ms", 10000)
+        );
+        List<String> seeds = zk.getSeedList();
+        log.info("after seeds: " + seeds.toString());
+        zk.close();
 
+        log.info("topic: " + this.topic + " partition: " + this.partition + " this.watermark: " + this.watermark);
+        
         int timeout = conf.getInt("kafka.socket.timeout.ms", 30000);
         int bufferSize = conf.getInt("kafka.socket.buffersize", 64*1024);
-        consumer =  new SimpleConsumer(this.split.getBrokerHost(), this.split.getBrokerPort(), timeout, bufferSize, getClientId());
-
+        fetcher = new KafkaInputFetcher(clientId, topic, partition, seeds, timeout, bufferSize);
         fetchSize = conf.getInt("kafka.fetch.size", 1024 * 1024);
         reset = conf.get("kafka.watermark.reset", "watermark");
-        earliestOffset = getEarliestOffset();
-        latestOffset = getLatestOffset();
+        smallestOffset = fetcher.getOffset(kafka.api.OffsetRequest.EarliestTime());
+        latestOffset = fetcher.getOffset(kafka.api.OffsetRequest.LatestTime());
 
-        //log.info("Last watermark for {} to {}", topic +":"+partition, watermark);
-
-        if ("earliest".equals(reset)) {
-            resetWatermark(-1);
-        } else if("latest".equals(reset)) {
-            resetWatermark(latestOffset);
-        } else if (watermark < earliestOffset) {
-            resetWatermark(-1);
+        log.info("reset: " + reset);
+        
+        if ("smallest".equals(reset)) {
+            resetWatermark(kafka.api.OffsetRequest.EarliestTime());
+        } else if("largest".equals(reset)) {
+            resetWatermark(kafka.api.OffsetRequest.LatestTime());
+        } else if (watermark < smallestOffset) {
+            resetWatermark(kafka.api.OffsetRequest.EarliestTime());
         }
 
         log.info(
-            "Split {} Topic: {} Broker: {} Partition: {} Earliest: {} Latest: {} Starting: {}", 
-            new Object[]{this.split, topic, this.split.getBrokerId(), partition, earliestOffset, latestOffset, watermark }
+            "Split {} Topic: {} Partition: {} Smallest: {} Largest: {} Starting: {}", 
+            new Object[]{this.split, topic, partition, smallestOffset, latestOffset, watermark }
         );
     }
 
@@ -110,51 +98,19 @@ public class KafkaInputRecordReader extends RecordReader<LongWritable, BytesWrit
         if (value == null) {
             value = new BytesWritable();
         }
-
-        if (messages == null) {
-// correlationId : scala.Int, clientId : scala.Predef.String, maxWait : scala.Int, minBytes : scala.Int, requestInfo : java.util.Map[kafka.common.TopicAndPartition, kafka.api.PartitionFetchInfo]
-            int correlationId = 1;
-            int maxWait = 10000;
-            int minBytes = 0;
-            Map<TopicAndPartition, PartitionFetchInfo> requestInfo = new HashMap<TopicAndPartition, PartitionFetchInfo>();
-            TopicAndPartition tp = new TopicAndPartition(topic, partition);
-            PartitionFetchInfo partOffset = new PartitionFetchInfo(-2L, 1);
-            requestInfo.put(tp, partOffset);
-
-            FetchRequest request = new FetchRequest(correlationId, getClientId(), maxWait, minBytes, requestInfo);
-
-            log.info("{} fetching offset {} ", topic+":" + split.getBrokerId() +":" + partition, watermark);
-            FetchResponse response = consumer.fetch(request);
-
-            if (response.hasError()) {
-                log.info(response.toString());
-                return false;
-            }
-            else {
-                messages = response.messageSet(topic, partition);
-                iterator = response.messageSet(topic, partition).iterator();
-                watermark += messages.validBytes();
-                if (!iterator.hasNext())
-                {
-                    //log.info("No more messages");
-                    return false;
-                }
-            }
-        }
-
-        if (iterator.hasNext())
-        {
-            MessageAndOffset messageOffset = iterator.next();
-            Message message = messageOffset.message();
-            key.set(watermark - message.size() - 4);
+        log.info("fetchSize: " + fetchSize);
+        MessageAndOffset messageAndOffset = fetcher.nextMessageAndOffset(fetchSize);
+        if (messageAndOffset == null) {
+        	log.info("no more next");
+            return false;
+        } else {
+        	log.info("has next! offset:" + messageAndOffset.offset());
+            key.set(messageAndOffset.offset());
+            Message message = messageAndOffset.message();
+            log.info("Message: " + message.toString());
             value.set(message.payload().array(), message.payload().arrayOffset(), message.payloadSize());
             numProcessedMessages++;
-            if (!iterator.hasNext())
-            {
-                messages = null;
-                iterator = null;
-            }
-            return true;
+            watermark = messageAndOffset.nextOffset();
         }
         log.warn("Unexpected iterator end.");
         return false;
@@ -175,16 +131,16 @@ public class KafkaInputRecordReader extends RecordReader<LongWritable, BytesWrit
     @Override
     public float getProgress() throws IOException, InterruptedException 
     {
-        if (watermark >= latestOffset || earliestOffset == latestOffset) {
+        if (watermark >= latestOffset || smallestOffset == latestOffset) {
             return 1.0f;
         }
-        return Math.min(1.0f, (watermark - earliestOffset) / (float)(latestOffset - earliestOffset));
+        return Math.min(1.0f, (watermark - smallestOffset) / (float)(latestOffset - smallestOffset));
     }
 
     @Override
     public void close() throws IOException
     {
-        log.info("{} num. processed messages {} ", topic+":" + split.getBrokerId() +":" + partition, numProcessedMessages);
+        log.info("{} num. processed messages {} ", topic+":" + partition, numProcessedMessages);
         if (numProcessedMessages >0)
         {
             ZkUtils zk = new ZkUtils(
@@ -194,44 +150,21 @@ public class KafkaInputRecordReader extends RecordReader<LongWritable, BytesWrit
             );
 
             String group = conf.get("kafka.groupid");
-            String partition = split.getBrokerId() + "-" + split.getPartition();
-            zk.commitLastConsumedOffset(group, split.getTopic(), partition, watermark);
+            zk.commitLastConsumedOffset(group, split.getTopic(), split.getPartition(), watermark);
             zk.close();
         }
-        consumer.close();
+        fetcher.close();
     }
 
-    private long getOffset(String topic, int partition, Long time, int maxOffset) {
-        Map<TopicAndPartition, PartitionOffsetRequestInfo> requestInfo = new HashMap<TopicAndPartition, PartitionOffsetRequestInfo>();
-        TopicAndPartition tp = new TopicAndPartition(topic, partition);
-        PartitionOffsetRequestInfo partOffset = new PartitionOffsetRequestInfo(time, maxOffset);
-        requestInfo.put(tp, partOffset);
-
-        OffsetRequest request = new OffsetRequest(requestInfo, (short) 1, getClientId());
-        OffsetResponse response = consumer.getOffsetsBefore(request);
-        return response.offsets(topic, partition)[0];
-    }
-
-    private long getEarliestOffset() {
-        if (earliestOffset <= 0) {
-            earliestOffset = getOffset(topic, partition, -2L, 1);
+    private void resetWatermark(Long offset) {
+        if (offset.equals(kafka.api.OffsetRequest.LatestTime())
+            || offset.equals(kafka.api.OffsetRequest.EarliestTime())
+        ) {
+            offset = fetcher.getOffset(offset);
         }
-        return earliestOffset;
+        log.info("{} resetting offset to {}", topic+":" + partition, offset);
+        watermark = smallestOffset = offset;
     }
 
-    private long getLatestOffset() {
-        if (latestOffset <= 0) {
-            latestOffset = getOffset(topic, partition, -1L, 1);
-        }
-        return latestOffset;
-    }
-
-    private void resetWatermark(long offset) {
-        if (offset <= 0) {
-            offset = getOffset(topic, partition, -1L, 1);
-        }
-        log.info("{} resetting offset to {}", topic+":" + split.getBrokerId() +":" + partition, offset);
-        watermark = earliestOffset = offset;
-    }
 
 }
