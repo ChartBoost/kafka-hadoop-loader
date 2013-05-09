@@ -99,7 +99,7 @@ public class FakeHadoopJob {
                     //realRecordReader.getProgress
                     LongWritable key = realRecordReader.getCurrentKey();
                     BytesWritable value = realRecordReader.getCurrentValue();
-                    if (mapper.map(key, value, conf) != null) {
+                    if (mapper.getKey(key, value, conf) != null) {
                         count++;
                     }
                 }

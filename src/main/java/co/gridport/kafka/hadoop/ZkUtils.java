@@ -41,14 +41,12 @@ public class ZkUtils implements Closeable {
     }
 
     public List<String> getSeedList() {
-    	log.info("brokers: " + seeds.toString());
         if (seeds == null || seeds.size() == 0) {
             //List<String> seeds = new ArrayList<String>();
             brokers = new HashMap<String, String>();
             List<String> brokerIds = getChildrenParentMayNotExist(BROKER_IDS_PATH);
             for(String bid: brokerIds) {
                 String data = client.readData(BROKER_IDS_PATH + "/" + bid);
-                log.info("Broker " + bid + " " + data);
                 try {
 	                JsonNode root = objectMapper.readTree(data);
 	                String host = root.path("host").getTextValue();

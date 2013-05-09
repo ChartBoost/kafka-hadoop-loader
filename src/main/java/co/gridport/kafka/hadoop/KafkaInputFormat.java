@@ -19,60 +19,44 @@ import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
-import org.mortbay.log.Log;
-
 
 public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
 
-    @Override
-    public List<InputSplit> getSplits(JobContext context) throws IOException, InterruptedException {
+	@Override
+	public List<InputSplit> getSplits(JobContext context) throws IOException, InterruptedException {
 
-        List<InputSplit> splits = new ArrayList<InputSplit>();
+		List<InputSplit> splits = new ArrayList<InputSplit>();
 
-        Configuration conf = context.getConfiguration();
-        List<String> topics = Arrays.asList(conf.get("kafka.topics").split(","));
-        ZkUtils zk = new ZkUtils(
-            conf.get("kafka.zk.connect"),
-            conf.getInt("kafka.zk.sessiontimeout.ms", 10000),
-            conf.getInt("kafka.zk.connectiontimeout.ms", 10000)
-        );
-        List<String> seeds = zk.getSeedList();
+		Configuration conf = context.getConfiguration();
+		List<String> topics = Arrays.asList(conf.get("kafka.topics").split(","));
+		ZkUtils zk = new ZkUtils(conf.get("kafka.zk.connect"), conf.getInt("kafka.zk.sessiontimeout.ms", 10000), conf.getInt("kafka.zk.connectiontimeout.ms",
+				10000));
+		List<String> seeds = zk.getSeedList();
 
-        String consumerGroup = conf.get("kafka.groupid");
+		String consumerGroup = conf.get("kafka.groupid");
 
-        Log.info("topics: " + topics.toString());
-        Log.info("seeds: " + seeds.toString());
-        for(final String seed: seeds) {
-        	Log.info("inside the seeds: " + seed);
-        	String[] hs = seed.split(":");
-            SimpleConsumer consumer = new SimpleConsumer(hs[0], Integer.parseInt(hs[1]), 10000, 65535, "PartitionsLookup");
-            TopicMetadataRequest request = new TopicMetadataRequest(topics);
-            Log.info(request.toString());
-            TopicMetadataResponse response = consumer.send(request);
-            if (response != null && response.topicsMetadata() != null) {
-                for(TopicMetadata tm: response.topicsMetadata()) {
-                    for(PartitionMetadata pm: tm.partitionsMetadata()) {
-                        long lastConsumedOffset = zk.getLastConsumedOffset(consumerGroup, tm.topic(), pm.partitionId()) ;
-                        InputSplit split = new KafkaInputSplit(
-                            seed, 
-                            tm.topic(), 
-                            pm.partitionId(), 
-                            lastConsumedOffset
-                        );
-                        splits.add(split);
-                    }
-                }
-            }
-        }
-        zk.close();
-        return splits;
-    }
+		for (final String seed : seeds) {
+			String[] hs = seed.split(":");
+			SimpleConsumer consumer = new SimpleConsumer(hs[0], Integer.parseInt(hs[1]), 10000, 65535, "PartitionsLookup");
+			TopicMetadataRequest request = new TopicMetadataRequest(topics);
+			TopicMetadataResponse response = consumer.send(request);
+			if (response != null && response.topicsMetadata() != null) {
+				for (TopicMetadata tm : response.topicsMetadata()) {
+					for (PartitionMetadata pm : tm.partitionsMetadata()) {
+						long lastConsumedOffset = zk.getLastConsumedOffset(consumerGroup, tm.topic(), pm.partitionId());
+						InputSplit split = new KafkaInputSplit(seed, tm.topic(), pm.partitionId(), lastConsumedOffset);
+						splits.add(split);
+					}
+				}
+			}
+		}
+		zk.close();
+		return splits;
+	}
 
-    @Override
-    public RecordReader<LongWritable, BytesWritable> createRecordReader(
-            InputSplit arg0, TaskAttemptContext arg1) throws IOException,
-            InterruptedException {
-        return new KafkaInputRecordReader() ;
-    }
+	@Override
+	public RecordReader<LongWritable, BytesWritable> createRecordReader(InputSplit arg0, TaskAttemptContext arg1) throws IOException, InterruptedException {
+		return new KafkaInputRecordReader();
+	}
 
 }

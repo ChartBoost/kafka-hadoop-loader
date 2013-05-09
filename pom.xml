@@ -2,7 +2,7 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>co.gridport.kafka</groupId>
-	<artifactId>khl</artifactId>
+	<artifactId>kafka-hadoop-loader</artifactId>
 	<packaging>jar</packaging>
 	<version>1.2.2-SNAPSHOT</version>
 	<name>Kafka Loader Configurable Hadoop Job</name>
@@ -53,6 +53,11 @@
 			<groupId>com.github.sgroschupf</groupId>
 			<artifactId>zkclient</artifactId>
 			<version>0.1</version>
+		</dependency>
+		<dependency>
+			<groupId>joda-time</groupId>
+			<artifactId>joda-time</artifactId>
+			<version>2.2</version>
 		</dependency>
 	</dependencies>
 
