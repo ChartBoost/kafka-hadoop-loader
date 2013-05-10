@@ -3,7 +3,9 @@ package co.gridport.kafka.hadoop;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import kafka.javaapi.PartitionMetadata;
 import kafka.javaapi.TopicMetadata;
@@ -22,6 +24,8 @@ import org.apache.hadoop.mapreduce.TaskAttemptContext;
 
 public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
 
+	private Set<String> partitions = new HashSet<String>();
+	
 	@Override
 	public List<InputSplit> getSplits(JobContext context) throws IOException, InterruptedException {
 
@@ -43,9 +47,13 @@ public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
 			if (response != null && response.topicsMetadata() != null) {
 				for (TopicMetadata tm : response.topicsMetadata()) {
 					for (PartitionMetadata pm : tm.partitionsMetadata()) {
-						long lastConsumedOffset = zk.getLastConsumedOffset(consumerGroup, tm.topic(), pm.partitionId());
-						InputSplit split = new KafkaInputSplit(seed, tm.topic(), pm.partitionId(), lastConsumedOffset);
-						splits.add(split);
+						String key = tm.topic() + "-" + pm.partitionId();
+						if (!partitions.contains(key)) {
+							long lastConsumedOffset = zk.getLastConsumedOffset(consumerGroup, tm.topic(), pm.partitionId());
+							InputSplit split = new KafkaInputSplit(seed, tm.topic(), pm.partitionId(), lastConsumedOffset);
+							splits.add(split);
+							partitions.add(key);
+						}
 					}
 				}
 			}
