@@ -103,7 +103,7 @@ public class KafkaInputFetcher {
 			Broker newLeader = findLeader(replicaBrokers);
 			if (newLeader == null) {
 				goToSleep = true;
-			} else if (oldLeader.host().equalsIgnoreCase(newLeader.host()) && oldLeader.port() == newLeader.port() && i == 0) {
+			} else if (oldLeader != null && oldLeader.host().equalsIgnoreCase(newLeader.host()) && oldLeader.port() == newLeader.port() && i == 0) {
 				goToSleep = true;
 			} else {
 				return newLeader;

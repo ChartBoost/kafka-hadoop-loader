@@ -51,8 +51,8 @@ public class HadoopJob extends Configured implements Tool {
 
 		Logger.getRootLogger().info("Using ZooKepper connection: " + conf.get("kafka.zk.connect"));
 
-		if (cmd.getOptionValue("autooffset-reset") != null) {
-			conf.set("kafka.watermark.reset", cmd.getOptionValue("autooffset-reset"));
+		if (cmd.getOptionValue("offset-reset") != null) {
+			conf.set("kafka.watermark.reset", cmd.getOptionValue("offset-reset"));
 			Logger.getRootLogger().info("SHOULD RESET OFFSET TO: " + conf.get("kafka.watermark.reset"));
 		}
 
