@@ -26,8 +26,6 @@ import org.slf4j.LoggerFactory;
 public class KafkaInputFetcher {
 	static Logger log = LoggerFactory.getLogger(KafkaInputRecordReader.class);
 
-	private List<String> seeds;
-
 	private String clientId;
 	private String topic;
 	private Integer partition;
@@ -42,7 +40,6 @@ public class KafkaInputFetcher {
 		this.clientId = clientId;
 		this.topic = topic;
 		this.partition = partition;
-		this.seeds = seeds;
 		messageQueue = new ConcurrentLinkedQueue<MessageAndOffset>();
 		leader = findLeader(seeds);
 		consumer = new SimpleConsumer(leader.host(), leader.port(), 10000, 65535, clientId);
@@ -50,7 +47,6 @@ public class KafkaInputFetcher {
 
 	public MessageAndOffset nextMessageAndOffset(Integer fetchSize) throws IOException {
 		if (messageQueue.size() < 100) {
-			log.info("{} fetching offset {} ", topic + ":" + partition, offset);
 			FetchRequestBuilder requestBuilder = new FetchRequestBuilder();
 			FetchRequest req = requestBuilder.clientId(clientId).addFetch(topic, partition, offset, fetchSize).build();
 			FetchResponse response = consumer.fetch(req);

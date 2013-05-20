@@ -39,13 +39,19 @@ public class HadoopJobMapper extends Mapper<LongWritable, BytesWritable, Text, T
 	public Text getKey(LongWritable key, BytesWritable value, Configuration conf) throws IOException {
 		String inputFormat = conf.get("input.format");
 		if (inputFormat.equals("json")) {
+			Text outDateKey = new Text();
+
 			JsonParser jp = jsonFactory.createJsonParser(value.getBytes());
 			JsonNode root = objectMapper.readTree(jp);
 			JsonNode time = root.path("time");
-			Text outDateKey = new Text();
+			JsonNode date_created = root.path("date_created");
 
 			if (!time.isMissingNode()) {
 				long ts = time.getLongValue() * 1000;
+				DateTime dt = new DateTime(ts);
+				outDateKey.set(fmt.print(dt));
+			} else if (!date_created.isMissingNode()) {
+				long ts = date_created.getLongValue() * 1000;
 				DateTime dt = new DateTime(ts);
 				outDateKey.set(fmt.print(dt));
 			} else {
