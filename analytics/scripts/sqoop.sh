@@ -1,0 +1,5 @@
+sqoop export --connect jdbc:mysql://percona1j.caffeine.io/store_aggr --username root --password -W?@A]smXI --export-dir /data/analytics/aggregate/item/daily --table daily_item_aggr --staging-table daily_item_aggr_staging --clear-staging-table --input-fields-terminated-by '\t' --input-null-string '\\N' --input-null-non-string '\\N' 
+
+sqoop export --connect jdbc:mysql://percona1j.caffeine.io/store_aggr --username root --password -W?@A]smXI --export-dir /data/analytics/aggregate/store/daily --table daily_store_aggr --staging-table daily_store_aggr_staging --clear-staging-table --input-fields-terminated-by '\t' --input-null-string '\\N' --input-null-non-string '\\N'
+
+sqoop export --connect jdbc:mysql://percona1j.caffeine.io/store_aggr --username root --password -W?@A]smXI --export-dir /data/analytics/aggregate/version/tracking/ --table version_tracking --staging-table version_tracking_staging --clear-staging-table --input-fields-terminated-by '\t' --input-null-string '\\N' --input-null-non-string '\\N'
