@@ -1,14 +1,16 @@
 dt=$1
-hr=$2
-dt_str=$3
+ydt=$2
+hr=$3
+dt_str=$4
 
 cat <<EOF | hive
+
+add jar /home/cb/runtime/bi_2.9.2-0.1.10.jar;
+CREATE TEMPORARY FUNCTION group_first AS 'io.caffeine.hadoop.collect.FirstOfGroupUDAF'; 
 
 set hive.exec.parallel=true;
 set hive.exec.dynamic.partition.mode=nonstrict;
 set hive.exec.dynamic.partition=true;
-
-add jar /home/cb/keith/brickhouse-0.3.1.jar;
 
 use store_analytics;
 
@@ -20,19 +22,20 @@ ALTER TABLE transact_json ADD IF NOT EXISTS PARTITION (dt = '$dt', hr = '$hr') l
 
 INSERT OVERWRITE TABLE purchase_data PARTITION (dt = '$dt', hr = '$hr')
 SELECT 
-  time, store, item, currency, amount, player
+  time, store, item, currency, amount, player, purchase
 FROM (
   SELECT 
-   time, store, item, currency, CAST(amount AS double) AS amount, player
+   CAST(time AS bigint) as time, store, item, 
+   CASE WHEN purchase = 'iap' THEN reward_currency ELSE currency END AS currency, 
+   CAST(amount AS double) AS amount, player, purchase
   FROM (
     SELECT json FROM purchase_json WHERE dt = '$dt' AND hr = '$hr'
   ) a
   LATERAL VIEW json_tuple(json, 'time', 'store', 'item', 'player') v AS time, sobj, iobj, player
   LATERAL VIEW json_tuple(sobj, '\$oid') p AS store
-  LATERAL VIEW json_tuple(iobj, 'id', 'amount', 'currency') i AS item, amount, currency
-  WHERE amount IS NOT NULL
+  LATERAL VIEW json_tuple(iobj, 'id', 'amount', 'currency', 'reward_currency', 'purchase') i AS item, amount, currency, reward_currency, purchase 
 ) b
-GROUP BY time, store, item, currency, amount, player;
+GROUP BY time, store, item, currency, amount, player, purchase;
 
 INSERT OVERWRITE TABLE iap_data PARTITION (dt = '$dt', hr = '$hr')
 SELECT 
@@ -60,7 +63,7 @@ CREATE VIEW units_sold_view AS
 SELECT 
   store, item, '' AS currency, '9' AS metric, CAST(count(amount) AS double) AS value
 FROM 
-  purchase_data WHERE dt = '$dt' AND hr = '$hr'
+  purchase_data WHERE dt = '$dt' AND hr = '$hr' AND amount IS NOT NULL
 GROUP BY store, item;
 
 
@@ -70,7 +73,7 @@ CREATE VIEW igc_spent_view AS
 SELECT 
   store, item, currency, '10' AS metric, sum(amount) AS value
 FROM 
-  purchase_data WHERE dt = '$dt' AND hr = '$hr'
+  purchase_data WHERE dt = '$dt' AND hr = '$hr' AND amount IS NOT NULL
 GROUP BY store, item, currency;
 
 
@@ -119,6 +122,54 @@ SELECT * FROM (
 ) a
 ;
 
+DROP VIEW IF EXISTS hook_purchase_item_view;
+
+CREATE VIEW hook_purchase_item_view AS
+SELECT 
+  d.store, d.item, '' AS currency, '11' AS metric, CAST(count(d.item) AS double) AS value
+FROM (
+  SELECT
+    c.store, c.player, c.currency, group_first(c.item) AS item, min(c.diff) AS diff
+  FROM
+  (
+    SELECT a.time, a.store, a.player, b.item, a.currency, b.time - a.time AS diff
+    FROM
+    (SELECT * from purchase_data where dt >= '$ydt' AND dt <= '$dt' AND purchase = 'iap' AND currency IS NOT NULL) a
+    JOIN 
+    (SELECT * from purchase_data where dt >= '$ydt' AND dt <= '$dt' AND purchase = 'currency' AND currency IS NOT NULL) b
+    ON
+    a.store = b.store and a.player = b.player and a.currency = b.currency
+  ) c
+  WHERE diff > 0
+  GROUP BY c.time, c.store, c.player, c.currency
+) d
+GROUP BY d.store, d.item
+;
+
+DROP VIEW IF EXISTS hook_purchase_store_view;
+
+CREATE VIEW hook_purchase_store_view AS
+SELECT 
+  d.store, '11' AS metric, CAST(count(d.item) AS double) AS value
+FROM (
+  SELECT
+    c.store, c.player, c.currency, group_first(c.item) AS item, min(c.diff) AS diff
+  FROM
+  (
+    SELECT a.time, a.store, a.player, b.item, a.currency, b.time - a.time AS diff
+    FROM
+    (SELECT * from purchase_data where dt >= '$ydt' AND dt <= '$dt' AND purchase = 'iap' AND currency IS NOT NULL) a
+    JOIN 
+    (SELECT * from purchase_data where dt >= '$ydt' AND dt <= '$dt' AND purchase = 'currency' AND currency IS NOT NULL) b
+    ON
+    a.store = b.store and a.player = b.player and a.currency = b.currency
+  ) c
+  WHERE diff > 0
+  GROUP BY c.time, c.store, c.player, c.currency
+) d
+GROUP BY d.store
+;
+
 
 ALTER TABLE store_agg_hourly ADD IF NOT EXISTS PARTITION (dt = '$dt', hr = '$hr') location '$dt/$hr';
 
@@ -151,6 +202,11 @@ SELECT * FROM (
     '$dt_str' AS date_string, store, item, currency, metric, value, unix_timestamp('$dt_str $hr:00:00') AS ts
   FROM 
     payer_count_item_view
+  UNION ALL
+  SELECT 
+    '$dt_str' AS date_string, store, item, currency, metric, value, unix_timestamp('$dt_str $hr:00:00') AS ts
+  FROM
+    hook_purchase_item_view
 ) a;
 
 DROP TABLE IF EXISTS store_agg_daily;
@@ -173,6 +229,11 @@ SELECT * FROM (
     '$dt_str' AS date_string, store, metric, value, unix_timestamp('$dt_str $hr:00:00') AS ts
   FROM 
     payer_count_store_view  
+    UNION ALL
+  SELECT 
+    '$dt_str' AS date_string, store, metric, value, unix_timestamp('$dt_str $hr:00:00') AS ts
+  FROM
+    hook_purchase_store_view
 ) a;
 
 DROP TABLE IF EXISTS version_tracking;

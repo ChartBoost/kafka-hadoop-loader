@@ -4,8 +4,6 @@ set hive.exec.parallel=true;
 set hive.exec.dynamic.partition.mode=nonstrict;
 set hive.exec.dynamic.partition=true;
 
-add jar /home/cb/keith/brickhouse-0.3.1.jar;
-
 use store_analytics;
 
 create external table if not exists tiers_info (
@@ -34,12 +32,13 @@ PARTITIONED BY (dt string, hr string)
 location '/data/analytics/store-transact/';
 
 create external table if not exists purchase_data (
-  time string,
+  time bigint,
   store string,
   item string,
   currency string,
   amount double,
-  player string
+  player string,
+  purchase string
 )
 PARTITIONED BY (dt string, hr string)
 ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'

@@ -1,7 +1,8 @@
 dt=$1
-hr=$2
-dt_str=$3
+ydt=$2
+hr=$3
+dt_str=$4
 
-./process.sh $dt $hr $dt_str
+./process.sh $dt $ydt $hr $dt_str
 
 ./sqoop.sh
