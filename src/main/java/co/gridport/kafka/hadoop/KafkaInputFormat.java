@@ -1,6 +1,7 @@
 package co.gridport.kafka.hadoop;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -40,25 +41,30 @@ public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
 		String consumerGroup = conf.get("kafka.groupid");
 
 		for (final String seed : seeds) {
-			String[] hs = seed.split(":");
+            String[] hs = seed.split(":");
             System.out.println("Connecting to seed: " + seed);
-			SimpleConsumer consumer = new SimpleConsumer(hs[0], Integer.parseInt(hs[1]), 10000, 65535, "PartitionsLookup");
-			TopicMetadataRequest request = new TopicMetadataRequest(topics);
-			TopicMetadataResponse response = consumer.send(request);
-			if (response != null && response.topicsMetadata() != null) {
-				for (TopicMetadata tm : response.topicsMetadata()) {
-					for (PartitionMetadata pm : tm.partitionsMetadata()) {
-						String key = tm.topic() + "-" + pm.partitionId();
-						if (!partitions.contains(key)) {
-							long lastConsumedOffset = zk.getLastConsumedOffset(consumerGroup, tm.topic(), pm.partitionId());
-							InputSplit split = new KafkaInputSplit(seed, tm.topic(), pm.partitionId(), lastConsumedOffset);
-							splits.add(split);
-							partitions.add(key);
-						}
-					}
-				}
-			}
-		}
+            try {
+                SimpleConsumer consumer = new SimpleConsumer(hs[0], Integer.parseInt(hs[1]), 10000, 65535, "PartitionsLookup");
+                TopicMetadataRequest request = new TopicMetadataRequest(topics);
+                TopicMetadataResponse response = consumer.send(request);
+                if (response != null && response.topicsMetadata() != null) {
+                    for (TopicMetadata tm : response.topicsMetadata()) {
+                        for (PartitionMetadata pm : tm.partitionsMetadata()) {
+                            String key = tm.topic() + "-" + pm.partitionId();
+                            if (!partitions.contains(key)) {
+                                long lastConsumedOffset = zk.getLastConsumedOffset(consumerGroup, tm.topic(), pm.partitionId());
+                                InputSplit split = new KafkaInputSplit(seed, tm.topic(), pm.partitionId(), lastConsumedOffset);
+                                splits.add(split);
+                                partitions.add(key);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Connection exception: " + e.getMessage());
+                continue;
+            }
+        }
 		zk.close();
 		return splits;
 	}
