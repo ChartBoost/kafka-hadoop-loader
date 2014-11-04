@@ -41,6 +41,7 @@ public class KafkaInputFormat extends InputFormat<LongWritable, BytesWritable> {
 
 		for (final String seed : seeds) {
 			String[] hs = seed.split(":");
+            System.out.println("Connecting to seed: " + seed);
 			SimpleConsumer consumer = new SimpleConsumer(hs[0], Integer.parseInt(hs[1]), 10000, 65535, "PartitionsLookup");
 			TopicMetadataRequest request = new TopicMetadataRequest(topics);
 			TopicMetadataResponse response = consumer.send(request);
