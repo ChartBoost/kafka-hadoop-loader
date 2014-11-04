@@ -2,7 +2,7 @@ kafka-hadoop-loader
 =====================
 
 This hadoop loader creates splits for each topic-broker-partition which creates
-ideal parallelism between kafka sterams and mapper tasks.
+ideal parallelism between kafka streams and mapper tasks.
 
 Further it does not use high level consumer and communicates with zookeeper directly
 for management of the consumed offsets, which are comitted at the end of each map task,

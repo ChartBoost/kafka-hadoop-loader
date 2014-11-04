@@ -10,6 +10,8 @@ import org.I0Itec.zkclient.ZkClient;
 import org.I0Itec.zkclient.exception.ZkMarshallingError;
 import org.I0Itec.zkclient.exception.ZkNoNodeException;
 import org.I0Itec.zkclient.serialize.ZkSerializer;
+import org.codehaus.jackson.JsonNode;
+import org.codehaus.jackson.map.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,32 +21,44 @@ public class ZkUtils implements Closeable {
 
     private static final String CONSUMERS_PATH = "/consumers";
     private static final String BROKER_IDS_PATH = "/brokers/ids";
-    private static final String    BROKER_TOPICS_PATH = "/brokers/topics";
+    private static final String BROKER_TOPICS_PATH = "/brokers/topics";
+    
+    private ObjectMapper objectMapper; 
 
     private ZkClient client ;
     Map<String, String> brokers ;
+    List<String> seeds = new ArrayList<String>();
 
     public ZkUtils(String zkConnectString, int sessionTimeout, int connectTimeout) {
         client = new ZkClient(zkConnectString, sessionTimeout, connectTimeout, new StringSerializer() );
+        objectMapper = new ObjectMapper();
         log.info("Connected zk");
     }
-    
+
     public ZkUtils(String zkConnectString)
     {
         this(zkConnectString, 10000, 10000);
     }
 
-    public String getBrokerName(String id) {
-        if (brokers == null) {
+    public List<String> getSeedList() {
+        if (seeds == null || seeds.size() == 0) {
+            //List<String> seeds = new ArrayList<String>();
             brokers = new HashMap<String, String>();
             List<String> brokerIds = getChildrenParentMayNotExist(BROKER_IDS_PATH);
             for(String bid: brokerIds) {
                 String data = client.readData(BROKER_IDS_PATH + "/" + bid);
-                log.info("Broker " + bid + " " + data);
-                brokers.put(bid, data.split(":", 2)[1]);
+                try {
+	                JsonNode root = objectMapper.readTree(data);
+	                String host = root.path("host").getTextValue();
+	                int port = root.path("port").getIntValue();
+	                brokers.put(bid, host + ":" + port);
+	                seeds.add(brokers.get(bid));
+                } catch (Exception e) {
+                	// do nothing;
+                }
             }
         }
-        return brokers.get(id);
+        return seeds;
     }
 
     public List<String> getBrokerPartitions(String topic) {
@@ -59,11 +73,11 @@ public class ZkUtils implements Closeable {
         return partitions;
     }
 
-    private String getOffsetsPath(String group, String topic, String partition) {
+    private String getOffsetsPath(String group, String topic, Integer partition) {
         return CONSUMERS_PATH + "/" + group + "/offsets/" + topic + "/" + partition;
     }
 
-    public long getLastConsumedOffset(String group, String topic, String partition) {
+    public long getLastConsumedOffset(String group, String topic, Integer partition) {
         String znode = getOffsetsPath(group ,topic ,partition);
         String offset = client.readData(znode, true);
         if (offset == null) {
@@ -75,7 +89,7 @@ public class ZkUtils implements Closeable {
     public void commitLastConsumedOffset(
         String group, 
         String topic, 
-        String partition, 
+        Integer partition, 
         long offset
     )
     {
@@ -108,6 +122,7 @@ public class ZkUtils implements Closeable {
     static class StringSerializer implements ZkSerializer {
 
         public StringSerializer() {}
+
         public Object deserialize(byte[] data) throws ZkMarshallingError {
             if (data == null) return null;
             return new String(data);
@@ -117,4 +132,5 @@ public class ZkUtils implements Closeable {
             return data.toString().getBytes();
         }
     }
+
 }
